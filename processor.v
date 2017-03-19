@@ -5,7 +5,7 @@ module processor(
 								 output [7:0] x_out,
 								 output [6:0] y_out,
 								 output [2:0] color_out,
-								 output 			writeEn			
+								 output 			writeEn
 								 );
 	 /*
 		clk - clock
@@ -24,6 +24,7 @@ module processor(
 	 wire 											ld_next;
 	 // Enables coordinate counters and loads in the new player coordinates 
 	 wire [7:0] 								x_in;
+	 wire [7:0] 								y_buffer; 
 	 wire [6:0] 								y_in;
 	 // Coordinate counters update and the d reads them in
 	 
@@ -33,27 +34,28 @@ module processor(
 															.clk(clk),
 															.resetn(resetn),
 															.enable(~writeEn),
-															.count(26'd10),
+															.count(26'd5),
 															.out(player_delay)
 															);
-	 x_counter coordinate_counter(
+	 coordinate_counter x_counter(
 																.clk(clk),
 																.resetn(resetn),
 																.enable(ld_next),
-																.start(2'b11),
-																.step(1'b0),
+																.start(8'b11),
+																.step(3'b1),
+																.step_sign(1'b0),
 																.out(x_in)
 																);
-	 y_counter coordinate_counter(
+	 coordinate_counter y_counter(
 																.clk(clk),
 																.resetn(resetn),
 																.enable(ld_next),
-																.start(2'b11),
-																.step(1'b0),
-																.out(y_in)
+																.start(8'b11),
+																.step(3'b1),
+																.step_sign(1'b0),
+																.out(y_buffer)
 																);
-	 
-	 
+	 assign y_in = y_buffer[6:0]; 
 
 	 control c(
 						 .clk(clk),
@@ -65,7 +67,8 @@ module processor(
 						 .alu_select(alu_select),
 						 .alu_op(alu_op),
 						 .writeEn(writeEn),
-						 .is_color(is_color) 
+						 .is_color(is_color),
+						 .ld_next(ld_next)
 						 );
 	 datapath d(
 							.clk(clk),
@@ -89,17 +92,17 @@ endmodule // processor
 
 
 module control(
-							 input 			clk,
-							 input 			resetn,
-							 input 			player_delay, 
-							 output reg ld_x,
-							 output reg ld_y,
-							 output reg ld_alu_out,
-							 output reg alu_select,
-							 output reg alu_op,
-							 output reg ld_next,
-							 output reg writeEn,
-							 output reg is_color
+							 input 				clk,
+							 input 				resetn,
+							 input 				player_delay, 
+							 output reg 	ld_x,
+							 output reg 	ld_y,
+							 output reg 	ld_alu_out,
+							 output reg 	alu_select,
+							 output reg 	alu_op,
+							 output reg 	ld_next,
+							 output reg 	writeEn,
+							 output reg 	is_color
 							 );
 	 /*
 		clk - clock
@@ -122,22 +125,21 @@ module control(
  
 	 
 	 
-	 reg [4:0] 							pcs, pns; // player_current_state, player_next_state,
-	 reg [3:0] 							player_drawer, player_eraser = 4'b0;
-	 wire 									player_delay;
-
+	 reg [4:0] 								pcs, pns; // player_current_state, player_next_state,
+	 reg [3:0] 								player_drawer, player_eraser = 4'b0;
+	 
 	 always @(*)
 		 begin: state_table	
 				if (pcs == S_WAIT)
 					pns = player_delay ? S_ERASE : S_WAIT;
 				else if (pcs == S_ERASE && player_eraser < 4'd12)
-					pns = pcs;
+					pns = S_ERASE;
 				else if (pcs == S_ERASE && player_eraser == 4'd12)
 					pns = S_LOAD;
 				else if (pcs == S_LOAD)
 					pns = S_DRAW;
 				else if (pcs == S_DRAW && player_drawer < 4'd12)
-					pns = pcs;
+					pns = S_DRAW;
 				else if (pcs == S_DRAW && player_drawer == 4'd12)
 					pns = S_WAIT; 
 				else 
@@ -156,8 +158,6 @@ module control(
 			if (pcs == S_WAIT) begin
 				 ld_x = 1'b1;
 				 ld_y = 1'b1;
-				 player_drawer = 4'b0;
-				 player_eraser = 4'b0; 
 			end
 			else if (pcs == S_ERASE) begin 
 				 writeEn = 1'b1;
@@ -181,17 +181,19 @@ module control(
 							 alu_op = 1'b1; 
 						end
 				 end
-				 player_eraser = player_eraser + 1; 
 			end // if (pcs == S_ERASE)
 			else if (pcs == S_LOAD) begin
+				 writeEn = 1'b1; 
 				 ld_next = 1'b1;
-				 ld_x = 1'b1;
-				 ld_y = 1'b1; 
 			end
 			else if (pcs == S_DRAW) begin
 				 writeEn = 1'b1;
-				 is_color = 1'b1; 
-				 if (player_drawer != 4'b0000 && player_drawer != 4'd12)begin
+				 is_color = 1'b1;
+				 if (player_drawer == 4'b0)begin
+						ld_x = 1'b1;
+						ld_y = 1'b1;
+				 end 
+				 else if (player_drawer != 4'd12)begin
 						// Don't do anything on the first or last step
 						ld_alu_out = 1'b1;
 						// We are always loading a value
@@ -211,7 +213,6 @@ module control(
 							 alu_op = 1'b1; 
 						end
 				 end
-				 player_drawer = player_drawer + 1;
 			end // if (pcs == S_DRAW)
 	 end // always @ begin
 	 
@@ -220,12 +221,21 @@ module control(
 			if (!resetn)
 				begin
 					 pcs <= S_WAIT;
-					 player_drawer = 4'd0;
-					 player_eraser = 4'd0; 
+					 player_drawer <= 4'd0;
+					 player_eraser <= 4'd0; 
 				end
-			else
-				pcs <= pns;
-	 end	 
+			else begin 
+				 if (pcs == S_ERASE)
+					 player_eraser <= player_eraser + 1;
+				 else if (pcs == S_DRAW)
+					 player_drawer <= player_drawer + 1;
+				 else if (pcs == S_WAIT) begin
+						player_eraser <= 4'd0;
+						player_drawer <= 4'd0; 
+				 end
+				 pcs <= pns;
+			end // else: !if(!resetn)
+	 end
 endmodule // control
 
 module datapath(
@@ -234,14 +244,14 @@ module datapath(
 								input [7:0] 		 x_in,
 								input [6:0] 		 y_in,
 								input 					 ld_x, ld_y,
-								input 					 ld_alu_out, 
-								input 					 alu_select,
-								input 					 alu_op,
-								input [2:0] 		 color_in,
-								input 					 is_color,
+								input ld_alu_out, 
+								input alu_select,
+								input alu_op,
+								input [2:0] color_in,
+								input is_color,
 								output reg [7:0] x_out,
 								output reg [6:0] y_out,
-								output [2:0] 		 color_out
+								output [2:0] color_out
 								);
 	 /*
 		clk - clock
@@ -261,24 +271,24 @@ module datapath(
 	 reg [7:0] 										 alu_in;
 	 reg [7:0] 										 alu_out;
 
-	 assign color_out = is_color ? color_in, 3'b000;
+	 assign color_out = is_color ? color_in : 3'b000;
 	 always @(posedge clk) begin
 			if (!resetn) begin
-				 x <= x_in;
-				 y <= y_in; 
+				 x_out <= x_in;
+				 y_out <= y_in; 
 			end
 			else begin
 				 if (ld_x)
-					 x <= ld_alu_out ? alu_out : x_in;
+					 x_out <= ld_alu_out ? alu_out : x_in;
 				 if (ld_y)
-					 y <= ld_alu_out ? alu_out : y_in; 
+					 y_out <= ld_alu_out ? alu_out : y_in; 
 			end
 	 end // always @ (posedge clk)
 	 always @(*) begin
-			if (alu_select = 1'b0)
-				alu_in = x;
+			if (alu_select == 1'b0)
+				alu_in = x_out;
 			else
-				alu_in = {1'b0,y}; 
+				alu_in = {1'b0,y_out}; 
 	 end // always @ begin
 
 	 always @(*) begin: ALU

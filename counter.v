@@ -54,6 +54,6 @@ module coordinate_counter(
 			if (!resetn)
 				out <= start;
 			else if (enable == 1)
-				out <= step_sign ? out + step : out - step;
+				out <= step_sign ? out - step : out + step;
 	 end 
 endmodule
