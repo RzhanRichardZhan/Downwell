@@ -16,76 +16,98 @@ module processor(
 		color_out - color of what we are drawing (may be black or color_in)
 		writeEn - enables writing
 		*/
-
-	 wire 											ld_x,ld_y,ld_alu_out,alu_select,alu_op,is_color;
-	 // All switches controlled by the c that will enables muxes in d
-	 wire 											player_delay;
+	 // Prevents everything from drawing when one unit is drawing
+	 reg 												busy;
+	 assign writeEn = busy;
+	 // All switches controlled by the c that will enables muxes in d	 
+	 wire 											player_ld_x,player_ld_y,player_ld_alu_out,player_alu_select,player_alu_op,player_is_color;
 	 // The counter that redraws the player
-	 wire 											ld_next;
+	 wire 											player_delay;
 	 // Enables coordinate counters and loads in the new player coordinates 
-	 wire [7:0] 								x_in;
-	 wire [7:0] 								y_buffer; 
-	 wire [6:0] 								y_in;
+	 wire 											player_ld_next;
 	 // Coordinate counters update and the d reads them in
-	 
-	 
+	 wire [7:0] 								player_x_in;
+	 wire [7:0] 								player_y_buffer; 
+	 wire [6:0] 								player_y_in;
+	 // Player is currently drawing
+	 wire 											player_busy;
+	 // Outputs of the player, to be fed into the demux
+	 wire [7:0] 								player_x_out;
+	 wire [6:0] 								player_y_out;
+	 wire [2:0] 								player_color_out;		
+	 // Busy is defined as anything wanting to draw
+	 always @(*) begin
+			busy = player_busy; 
+	 end
 	 // Change count eventually
 	 time_counter delay_counter(
 															.clk(clk),
 															.resetn(resetn),
-															.enable(~writeEn),
+															.enable(~busy),
 															.count(26'd5),
 															.out(player_delay)
 															);
 	 coordinate_counter x_counter(
 																.clk(clk),
 																.resetn(resetn),
-																.enable(ld_next),
+																.enable(player_ld_next),
 																.start(8'b11),
 																.step(3'b1),
 																.step_sign(1'b0),
-																.out(x_in)
+																.out(player_x_in)
 																);
 	 coordinate_counter y_counter(
 																.clk(clk),
 																.resetn(resetn),
-																.enable(ld_next),
+																.enable(player_ld_next),
 																.start(8'b11),
 																.step(3'b1),
 																.step_sign(1'b0),
-																.out(y_buffer)
+																.out(player_y_buffer)
 																);
-	 assign y_in = y_buffer[6:0]; 
+	 vga_demux vga_d(
+									 .clk(clk),
+									 .resetn(resetn),
+									 .busy(busy),
+									 .player_x_out(player_x_out),
+									 .player_y_out(player_y_out),
+									 .player_color_out(player_color_out),
+									 .x_out(x_out),
+									 .y_out(y_out),
+									 .color_out(color_out)
+									 );
+	 
+	 assign player_y_in = player_y_buffer[6:0]; 
 
-	 control c(
-						 .clk(clk),
-						 .resetn(resetn),
-						 .player_delay(player_delay),
-						 .ld_x(ld_x),
-						 .ld_y(ld_y),
-						 .ld_alu_out(ld_alu_out),
-						 .alu_select(alu_select),
-						 .alu_op(alu_op),
-						 .writeEn(writeEn),
-						 .is_color(is_color),
-						 .ld_next(ld_next)
-						 );
-	 datapath d(
-							.clk(clk),
-							.resetn(resetn),
-							.x_in(x_in),
-							.y_in(y_in),
-							.ld_x(ld_x),
-							.ld_y(ld_y),
-							.ld_alu_out(ld_alu_out),
-							.alu_select(alu_select),
-							.alu_op(alu_op),
-							.color_in(color_in),
-							.is_color(is_color),
-							.x_out(x_out),
-							.y_out(y_out),
-							.color_out(color_out)
-							);
+	 control player_c(
+										.clk(clk),
+										.resetn(resetn),
+										.player_delay(player_delay),
+										.ld_x(player_ld_x),
+										.ld_y(player_ld_y),
+										.ld_alu_out(player_ld_alu_out),
+										.alu_select(player_alu_select),
+										.alu_op(player_alu_op),
+										.writeEn(player_busy),
+										.is_color(player_is_color),
+										.ld_next(player_ld_next)
+										);
+	 datapath player_d(
+										 .clk(clk),
+										 .resetn(resetn),
+										 .x_in(player_x_in),
+										 .y_in(player_y_in),
+										 .ld_x(player_ld_x),
+										 .ld_y(player_ld_y),
+										 .ld_alu_out(player_ld_alu_out),
+										 .alu_select(player_alu_select),
+										 .alu_op(player_alu_op),
+										 .color_in(color_in),
+										 .is_color(player_is_color),
+										 .x_out(player_x_out),
+										 .y_out(player_y_out),
+										 .color_out(player_color_out)
+										 );
 	 
 	 
 endmodule // processor

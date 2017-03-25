@@ -1,6 +1,6 @@
 vlib work
 
-vlog -timescale 1ns/1ns processor.v counter.v
+vlog -timescale 1ns/1ns processor.v counter.v vga_demux.v
 
 vsim processor
 log {/*}
