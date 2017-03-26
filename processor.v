@@ -34,12 +34,43 @@ module processor(
 	 // Outputs of the player, to be fed into the demux
 	 wire [7:0] 								player_x_out;
 	 wire [6:0] 								player_y_out;
-	 wire [2:0] 								player_color_out;		
+	 wire [2:0] 								player_color_out;
+
+
+	 wire 											wall_ld_x,wall_ld_y,wall_ld_alu_out,wall_alu_select,wall_alu_op,wall_is_color;
+	 wire 											wall_delay;
+	 wire 											wall_ld_next;
+	 wire [7:0] 								wall_x_in;
+	 wire [7:0] 								wall_y_buffer; 
+	 wire [6:0] 								wall_y_in;
+	 wire 											wall_busy;
+	 wire [7:0] 								wall_x_out;
+	 wire [6:0] 								wall_y_out;
+	 wire [2:0] 								wall_color_out;
+
+	 
 	 // Busy is defined as anything wanting to draw
 	 always @(*) begin
-			busy = player_busy; 
+			busy = player_busy || wall_busy; 
 	 end
-	 // Change count eventually
+
+	 vga_demux vga_d(
+									 .clk(clk),
+									 .resetn(resetn),
+									 .busy(busy),
+									 .player_x_out(player_x_out),
+									 .player_y_out(player_y_out),
+									 .player_color_out(player_color_out),
+									 .player_busy(player_busy),
+									 .wall_x_out(wall_x_out),
+									 .wall_y_out(wall_y_out),
+									 .wall_color_out(wall_color_out),
+									 .wall_busy(wall_busy),
+									 .x_out(x_out),
+									 .y_out(y_out),
+									 .color_out(color_out)
+									 );
+	 // For the player
 	 time_counter delay_counter(
 															.clk(clk),
 															.resetn(resetn),
@@ -65,17 +96,45 @@ module processor(
 																.step_sign(1'b0),
 																.out(player_y_buffer)
 																);
-	 vga_demux vga_d(
+	 // For the wall
+	 time_counter wall_counter(
+														 .clk(clk),
+														 .resetn(resetn),
+														 .enable(~busy),
+														 .count(26'd13),
+														 .out(wall_delay)
+														 );
+	 wall_control wall_c(
+											 .clk(clk),
+											 .resetn(resetn),
+											 .wall_delay(wall_delay),
+											 .ld_x(wall_ld_x),
+											 .ld_y(wall_ld_y),
+											 .ld_alu_out(wall_ld_alu_out),
+											 .alu_select(wall_alu_select),
+											 .alu_op(wall_alu_op),
+											 .writeEn(wall_busy),
+											 .is_color(wall_is_color) 
+											 );
+	 
+	 datapath wall_d(
 									 .clk(clk),
 									 .resetn(resetn),
-									 .busy(busy),
-									 .player_x_out(player_x_out),
-									 .player_y_out(player_y_out),
-									 .player_color_out(player_color_out),
-									 .x_out(x_out),
-									 .y_out(y_out),
-									 .color_out(color_out)
-									 );
+									 .x_in(8'b1),
+									 .y_in(7'b1),
+									 .ld_x(wall_ld_x),
+									 .ld_y(wall_ld_y),
+									 .ld_alu_out(wall_ld_alu_out),
+									 .alu_select(wall_alu_select),
+									 .alu_op(wall_alu_op),
+									 .color_in(3'b111),
+									 .is_color(wall_is_color),
+									 .x_out(wall_x_out),
+									 .y_out(wall_y_out),
+									 .color_out(wall_color_out)
+									 )	;
+	 
+	 
 	 
 	 assign player_y_in = player_y_buffer[6:0]; 
 
@@ -83,6 +142,7 @@ module processor(
 										.clk(clk),
 										.resetn(resetn),
 										.player_delay(player_delay),
+										.busy(busy),
 										.ld_x(player_ld_x),
 										.ld_y(player_ld_y),
 										.ld_alu_out(player_ld_alu_out),
@@ -114,17 +174,18 @@ endmodule // processor
 
 
 module control(
-							 input 				clk,
-							 input 				resetn,
-							 input 				player_delay, 
-							 output reg 	ld_x,
-							 output reg 	ld_y,
-							 output reg 	ld_alu_out,
-							 output reg 	alu_select,
-							 output reg 	alu_op,
-							 output reg 	ld_next,
-							 output reg 	writeEn,
-							 output reg 	is_color
+							 input 			clk,
+							 input 			resetn,
+							 input 			player_delay,
+							 input 			busy, 
+							 output reg ld_x,
+							 output reg ld_y,
+							 output reg ld_alu_out,
+							 output reg alu_select,
+							 output reg alu_op,
+							 output reg ld_next,
+							 output reg writeEn,
+							 output reg is_color
 							 );
 	 /*
 		clk - clock
@@ -147,26 +208,26 @@ module control(
  
 	 
 	 
-	 reg [4:0] 								pcs, pns; // player_current_state, player_next_state,
-	 reg [3:0] 								player_drawer, player_eraser = 4'b0;
+	 reg [4:0] 							pcs, pns; // player_current_state, player_next_state,
+	 reg [3:0] 							player_drawer, player_eraser = 4'b0;
 	 
 	 always @(*)
-		 begin: state_table	
-				if (pcs == S_WAIT)
-					pns = player_delay ? S_ERASE : S_WAIT;
-				else if (pcs == S_ERASE && player_eraser < 4'd12)
-					pns = S_ERASE;
-				else if (pcs == S_ERASE && player_eraser == 4'd12)
-					pns = S_LOAD;
-				else if (pcs == S_LOAD)
-					pns = S_DRAW;
-				else if (pcs == S_DRAW && player_drawer < 4'd12)
-					pns = S_DRAW;
-				else if (pcs == S_DRAW && player_drawer == 4'd12)
-					pns = S_WAIT; 
-				else 
-					pns = S_WAIT;
-		 end // block: state_table
+						 begin: state_table
+								if (pcs == S_WAIT)
+									pns = player_delay ? S_ERASE : S_WAIT;
+								else if (pcs == S_ERASE && player_eraser < 4'd12)
+									pns = S_ERASE;
+								else if (pcs == S_ERASE && player_eraser == 4'd12)
+									pns = S_LOAD;
+								else if (pcs == S_LOAD)
+									pns = S_DRAW;
+								else if (pcs == S_DRAW && player_drawer < 4'd12)
+									pns = S_DRAW;
+								else if (pcs == S_DRAW && player_drawer == 4'd12)
+									pns = S_WAIT; 
+								else 
+									pns = S_WAIT;
+						 end // block: state_table
 	 
 	 always @(*) begin
 			ld_x = 1'b0;
