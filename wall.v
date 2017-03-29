@@ -11,11 +11,16 @@ module wall_control(
 										output reg is_color
 										);
 	 localparam
-		 S0 = 5'd0,	
+		 S0 = 5'd0,
+		 S1_WAIT = 5'd6,
 		 S1 = 5'd1,
+		 S2_WAIT = 5'd7,
 		 S2 = 5'd2,
-		 S3 = 5'd3,
+		 S3_WAIT = 5'd8,
+		 S3 = 5'd3, 
+		 S4_WAIT = 5'd9,
 		 S4 = 5'd4,
+		 S5_WAIT = 5'd10,
 		 S5 = 5'd5;
 	 
 
@@ -24,28 +29,36 @@ module wall_control(
 
 	 always @(*)
 		 begin: state_table
-				if (cs == S0)
-					ns = wall_delay ? S1 : S0; 
+				if (cs == S1_WAIT)
+					ns = wall_delay ? S1 : S1_WAIT; 
 				else if (cs == S1 && draw_1 < 7'd119)
 					ns = S1;
 				else if (cs == S1 && draw_1 == 7'd119)
-					ns = S2;
+					ns = S2_WAIT;
+				else if (cs == S2_WAIT)
+					ns = wall_delay ? S2 : S2_WAIT;
 				else if (cs == S2 && draw_2 < 7'd119)
 					ns = S2;
 				else if (cs == S2 && draw_2 == 7'd119)
-					ns = S3;
+					ns = S3_WAIT;
+				else if (cs == S3_WAIT)
+					ns = wall_delay ? S3 : S3_WAIT;
 				else if (cs == S3 && draw_3 < 7'd119)
 					ns = S3;
 				else if (cs == S3 && draw_3 == 7'd119)
-					ns = S4;
+					ns = S4_WAIT;
+				else if (cs == S4_WAIT)
+					ns = wall_delay ? S4 : S4_WAIT;
 				else if (cs == S4 && draw_4 < 7'd119)
 					ns = S4;
 				else if (cs == S4 && draw_4 == 7'd119)
-					ns = S5;
+					ns = S5_WAIT;
+				else if (cs == S5_WAIT)
+					ns = wall_delay ? S5 : S5_WAIT;
 				else if (cs == S5 && draw_5 < 7'd119)
 					ns = S5;
 				else if (cs == S5 && draw_5 == 7'd119)
-					ns = S0; 
+										ns = S1_WAIT; 
 		 end // block: state_table
 
 	 always @(*) begin
@@ -119,7 +132,7 @@ module wall_control(
 	 always @(posedge clk) begin
 			if (!resetn)
 				begin
-					 cs <= S0;
+					 cs <= S1_WAIT;
 					 draw_1 <= 7'd0;
 					 draw_2 <= 7'd0;
 					 draw_3 <= 7'd0;
@@ -137,7 +150,7 @@ module wall_control(
 					 draw_4 <= draw_4 + 1; 
 				 else if (cs == S5)
 					 draw_5 <= draw_5 + 1;
-				 else if (cs == S0) begin
+				 else if (cs == S1_WAIT) begin
 						draw_1 <= 7'd0;
 						draw_2 <= 7'd0;
 						draw_3 <= 7'd0;
