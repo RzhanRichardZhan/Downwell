@@ -72,14 +72,36 @@ module processor(
 	 reg isbullet = 1'b0;
 	 reg bullet_stop;
 
-	 reg player_direction;
-	 reg player_step;
+	 wire enemy_ld_x,enemy_ld_y,enemy_ld_alu_out,enemy_alu_select,enemy_alu_op,enemy_is_color;
+	 // The counter that redraws the enemy
+	 wire enemy_delay;
+	 // Enables coordinate counters and loads in the new enemy coordinates 
+	 wire enemy_ld_next;
+	 // Coordinate counters update and the d reads them in
+	 wire [7:0] enemy_x_in;
+	 wire [7:0] enemy_y_buffer; 
+	 wire [6:0] enemy_y_in;
+	 reg [7:0] 	enemy_x_start; 	
+	 // enemy is currently drawing
+	 wire 			enemy_busy;
+	 // Outputs of the enemy, to be fed into the demux
+	 wire [7:0] enemy_x_out;
+	 wire [6:0] enemy_y_out;
+	 wire [2:0] enemy_color_out;
+	 wire 			enemy_alive;
+	 wire [6:0] enemy_x_part_one;
+	 wire [4:0] enemy_x_part_two;
+			
+
+	 reg 				player_direction;
+	 reg 				player_step;
 	 
 	 // Busy is defined as anything wanting to draw
 	 always @(*) begin
 			busy = player_busy || wall_busy || bullet_busy;
 			stop = resetn && space;
 			bullet_stop = (resetn && space) || (bullet_enable && isbullet);
+			enemy_x_start = enemy_x_part_one + enemy_x_part_two; 
 			if (!space) isbullet <= 1'b1;
 			if ((~left && player_x_out >= 8'd2) || (~right && player_x_out <= 8'd158))
 				player_step = 3'b1;
@@ -108,6 +130,10 @@ module processor(
 									 .bullet_y_out(bullet_y_out),
 									 .bullet_color_out(bullet_color_out),
 									 .bullet_busy(bullet_busy),
+									 .enemy_x_out(enemy_x_out),
+									 .enemy_y_out(enemy_y_out),
+									 .enemy_color_out(enemy_color_out),
+									 .enemy_busy(enemy_busy),
 									 .x_out(x_out),
 									 .y_out(y_out),
 									 .color_out(color_out)
@@ -138,42 +164,121 @@ module processor(
 																.step_sign(1'b0),
 																.out(player_y_buffer)
 																);
-	time_counter bullet_counter(
+	 time_counter bullet_counter(
+															 .clk(clk),
+															 .resetn(resetn),
+															 .enable(~busy),
+															 .count(26'd400000),
+															 .out(bullet_delay)
+															 );
+	 coordinate_counter bullet_x_counter(
+																			 .clk(clk),
+																			 .resetn(bullet_stop),
+																			 .enable(bullet_ld_next),
+																			 .start(player_x_out),
+																			 .step(3'b0),
+																			 .step_sign(1'b0),
+																			 .out(bullet_x_in)
+																			 );
+	 coordinate_counter bullet_y_counter(
+																			 .clk(clk),
+																			 .resetn(bullet_stop),
+																			 .enable(bullet_ld_next),
+																			 .start(player_y_out + 7'd4),
+																			 .step(3'b1),
+																			 .step_sign(1'b0),
+																			 .out(bullet_y_buffer)
+																			 );
+
+	 seven_shifter randomizer_one(
+																.clk(clk),
+																.resetn(resetn),
+																.enable(1'b1),
+																.load_all(7'b1001101),
+																.out_all(enemy_x_part_one)
+																);
+	 five_shifter randomizer_two(
+															 .clk(clk),
+															 .resetn(resetn),
+															 .enable(1'b1),
+															 .load_all(5'b11100),
+															 .out_all(enemy_x_part_two)
+															 );
+	 
+	 
+	 time_counter enemy_counter(
 															.clk(clk),
 															.resetn(resetn),
 															.enable(~busy),
-															.count(26'd400000),
-															.out(bullet_delay)
+															.count(wall_velocity),
+															.out(enemy_delay)
 															);
-	 coordinate_counter bullet_x_counter(
-																.clk(clk),
-																.resetn(bullet_stop),
-																.enable(bullet_ld_next),
-																.start(player_x_out),
-																.step(3'b0),
-																.step_sign(1'b0),
-																.out(bullet_x_in)
-																);
-	 coordinate_counter bullet_y_counter(
-																.clk(clk),
-																.resetn(bullet_stop),
-																.enable(bullet_ld_next),
-																.start(player_y_out + 7'd4),
-																.step(3'b1),
-																.step_sign(1'b0),
-																.out(bullet_y_buffer)
-																);
-		
+	 
+	 coordinate_counter enemy_x_counter(
+																			.clk(clk),
+																			.resetn(enemy_alive),
+																			.enable(enemy_ld_next),
+																			.start(enemy_x_start),
+																			.step(3'b0),
+																			.step_sign(1'b0),
+																			.out(enemy_x_in)
+																			);
+	 coordinate_counter enemy_y_counter(
+																			.clk(clk),
+																			.resetn(enemy_alive),
+																			.enable(enemy_ld_next),
+																			.start(7'd110),
+																			.step(3'b1),
+																			.step_sign(1'b1),
+																			.out(enemy_y_buffer)
+																			);
+	 enemy_control enemy_c(
+												 .clk(clk),
+												 .resetn(resetn),
+												 .player_delay(enemy_delay),
+												 .busy(busy),
+												 .alive(enemy_alive),
+												 .ld_x(enemy_ld_x),
+												 .ld_y(enemy_ld_y),
+												 .ld_alu_out(enemy_ld_alu_out),
+												 .alu_select(enemy_alu_select),
+												 .alu_op(enemy_alu_op),
+												 .writeEn(enemy_busy),
+												 .is_color(enemy_is_color),
+												 .ld_next(enemy_ld_next)
+												 );
+	 enemy_datapath enemy_d(
+													.clk(clk),
+													.resetn(resetn),
+													.x_in(enemy_x_in),
+													.y_in(enemy_y_in),
+													.ld_x(enemy_ld_x),
+													.ld_y(enemy_ld_y),
+													.ld_alu_out(enemy_ld_alu_out),
+													.alu_select(enemy_alu_select),
+													.alu_op(enemy_alu_op),
+													.color_in(3'b100),
+													.is_color(enemy_is_color),
+													.bullet_x(bullet_x_out),
+													.bullet_y(bullet_y_out),
+													.x_out(enemy_x_out),
+													.y_out(enemy_y_out),
+													.color_out(enemy_color_out),
+													.alive(enemy_alive)
+													);
+	 
+	 
+	 
 	
 	 // For the wall
 	 acceleration_counter a_count(
-		.clk(clk),
-		.resetn(stop),
-		.enable(~busy),
-		.count(26'd850000),
-		.terminal_velocity(26'd1000000),
-		.out(wall_velocity)
-	 );
+																.clk(clk),
+																.resetn(stop),
+																.enable(~busy),
+																.count(26'd850000),
+																.terminal_velocity(26'd1000000),
+																.out(wall_velocity)
+																);
 	 time_counter wall_counter(
 														 .clk(clk),
 														 .resetn(resetn),
@@ -215,6 +320,8 @@ module processor(
 	 
 	 assign player_y_in = player_y_buffer[6:0]; 
 	 assign bullet_y_in = bullet_y_buffer[6:0];
+	 assign enemy_y_in = enemy_y_buffer[6:0];
+	 
 
 	 control player_c(
 										.clk(clk),
@@ -248,39 +355,39 @@ module processor(
 										 );
 		
 	 bullet_control bullet_c(
-										.clk(clk),
-										.resetn(resetn),
-										.player_delay(bullet_delay),
-										.busy(busy),
-										.enable(bullet_enable),
-										.space(space),
-										.isbullet(isbullet),
-										.ld_x(bullet_ld_x),
-										.ld_y(bullet_ld_y),
-										.ld_alu_out(bullet_ld_alu_out),
-										.alu_select(bullet_alu_select),
-										.alu_op(bullet_alu_op),
-										.writeEn(bullet_busy),
-										.is_color(bullet_is_color),
-										.ld_next(bullet_ld_next)
-										);
+													 .clk(clk),
+													 .resetn(resetn),
+													 .player_delay(bullet_delay),
+													 .busy(busy),
+													 .enable(bullet_enable),
+													 .space(space),
+													 .isbullet(isbullet),
+													 .ld_x(bullet_ld_x),
+													 .ld_y(bullet_ld_y),
+													 .ld_alu_out(bullet_ld_alu_out),
+													 .alu_select(bullet_alu_select),
+													 .alu_op(bullet_alu_op),
+													 .writeEn(bullet_busy),
+													 .is_color(bullet_is_color),
+													 .ld_next(bullet_ld_next)
+													 );
 	 bullet_datapath bullet_d(
-										 .clk(clk),
-										 .resetn(resetn),
-										 .x_in(bullet_x_in),
-										 .y_in(bullet_y_in),
-										 .ld_x(bullet_ld_x),
-										 .ld_y(bullet_ld_y),
-										 .ld_alu_out(bullet_ld_alu_out),
-										 .alu_select(bullet_alu_select),
-										 .alu_op(bullet_alu_op),
-										 .color_in(3'b001),
-										 .is_color(bullet_is_color),
-										 .x_out(bullet_x_out),
-										 .y_out(bullet_y_out),
-										 .color_out(bullet_color_out),
-										 .bullet_enable(bullet_enable)
-										 );
+														.clk(clk),
+														.resetn(resetn),
+														.x_in(bullet_x_in),
+														.y_in(bullet_y_in),
+														.ld_x(bullet_ld_x),
+														.ld_y(bullet_ld_y),
+														.ld_alu_out(bullet_ld_alu_out),
+														.alu_select(bullet_alu_select),
+														.alu_op(bullet_alu_op),
+														.color_in(3'b001),
+														.is_color(bullet_is_color),
+														.x_out(bullet_x_out),
+														.y_out(bullet_y_out),
+														.color_out(bullet_color_out),
+														.bullet_enable(bullet_enable)
+														);
 	 
 	 
 endmodule // processor
