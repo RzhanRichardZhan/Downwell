@@ -1,6 +1,6 @@
 module downwell(
 								input 			 CLOCK_50,
-								input [0:0]  KEY,
+								input [3:0]  KEY,
 
 								output 			 VGA_CLK, //	VGA Clock
 								output 			 VGA_HS, //	VGA H_SYNC
@@ -22,6 +22,9 @@ module downwell(
 							 .x_out(x),
 							 .y_out(y),
 							 .color_out(color),
+							 .space(KEY[1]),
+							 .left(KEY[2]),
+							 .right(KEY[3]),
 							 .writeEn(writeEn)
 							 );
 

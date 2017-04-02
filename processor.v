@@ -2,6 +2,9 @@ module processor(
 								 input 				clk,
 								 input 				resetn,
 								 input [2:0] 	color_in,
+								 input space,
+								 input left,
+								 input right,
 								 output [7:0] x_out,
 								 output [6:0] y_out,
 								 output [2:0] color_out,
@@ -18,6 +21,7 @@ module processor(
 		*/
 	 // Prevents everything from drawing when one unit is drawing
 	 reg 												busy;
+	 reg 												stop;
 	 assign writeEn = busy;
 	 // All switches controlled by the c that will enables muxes in d	 
 	 wire 											player_ld_x,player_ld_y,player_ld_alu_out,player_alu_select,player_alu_op,player_is_color;
@@ -47,11 +51,45 @@ module processor(
 	 wire [7:0] 								wall_x_out;
 	 wire [6:0] 								wall_y_out;
 	 wire [2:0] 								wall_color_out;
+	 wire [25:0]								wall_velocity;
+	 
+	 wire 											bullet_ld_x,bullet_ld_y,bullet_ld_alu_out,bullet_alu_select,bullet_alu_op,bullet_is_color;
+	 // The counter that redraws the bullet
+	 wire 											bullet_delay;
+	 // Enables coordinate counters and loads in the new bullet coordinates 
+	 wire 											bullet_ld_next;
+	 // Coordinate counters update and the d reads them in
+	 wire [7:0] 								bullet_x_in;
+	 wire [7:0] 								bullet_y_buffer; 
+	 wire [6:0] 								bullet_y_in;
+	 // bullet is currently drawing
+	 wire 											bullet_busy;
+	 // Outputs of the bullet, to be fed into the demux
+	 wire [7:0] 								bullet_x_out;
+	 wire [6:0] 								bullet_y_out;
+	 wire [2:0] 								bullet_color_out;
+	 wire bullet_enable;
+	 reg isbullet = 1'b0;
+	 reg bullet_stop;
 
+	 reg player_direction;
+	 reg player_step;
 	 
 	 // Busy is defined as anything wanting to draw
 	 always @(*) begin
-			busy = player_busy || wall_busy; 
+			busy = player_busy || wall_busy || bullet_busy;
+			stop = resetn && space;
+			bullet_stop = (resetn && space) || (bullet_enable && isbullet);
+			if (!space) isbullet <= 1'b1;
+			if ((~left && player_x_out >= 8'd2) || (~right && player_x_out <= 8'd158))
+				player_step = 3'b1;
+			else
+				player_step = 3'b0;
+			if (~left)
+				player_direction = 1'b0;
+			else if (~right)
+				player_direction = 1'b1;
+	 
 	 end
 
 	 vga_demux vga_d(
@@ -66,6 +104,10 @@ module processor(
 									 .wall_y_out(wall_y_out),
 									 .wall_color_out(wall_color_out),
 									 .wall_busy(wall_busy),
+									 .bullet_x_out(bullet_x_out),
+									 .bullet_y_out(bullet_y_out),
+									 .bullet_color_out(bullet_color_out),
+									 .bullet_busy(bullet_busy),
 									 .x_out(x_out),
 									 .y_out(y_out),
 									 .color_out(color_out)
@@ -75,7 +117,7 @@ module processor(
 															.clk(clk),
 															.resetn(resetn),
 															.enable(~busy),
-															.count(26'd5),
+															.count(26'd10000000),
 															.out(player_delay)
 															);
 	 coordinate_counter x_counter(
@@ -83,8 +125,8 @@ module processor(
 																.resetn(resetn),
 																.enable(player_ld_next),
 																.start(8'b11),
-																.step(3'b1),
-																.step_sign(1'b0),
+																.step(player_step),
+																.step_sign(player_direction),
 																.out(player_x_in)
 																);
 	 coordinate_counter y_counter(
@@ -92,16 +134,51 @@ module processor(
 																.resetn(resetn),
 																.enable(player_ld_next),
 																.start(8'b11),
-																.step(3'b1),
+																.step(3'b0),
 																.step_sign(1'b0),
 																.out(player_y_buffer)
 																);
+	time_counter bullet_counter(
+															.clk(clk),
+															.resetn(resetn),
+															.enable(~busy),
+															.count(26'd400000),
+															.out(bullet_delay)
+															);
+	 coordinate_counter bullet_x_counter(
+																.clk(clk),
+																.resetn(bullet_stop),
+																.enable(bullet_ld_next),
+																.start(player_x_out),
+																.step(3'b0),
+																.step_sign(1'b0),
+																.out(bullet_x_in)
+																);
+	 coordinate_counter bullet_y_counter(
+																.clk(clk),
+																.resetn(bullet_stop),
+																.enable(bullet_ld_next),
+																.start(player_y_out + 7'd4),
+																.step(3'b1),
+																.step_sign(1'b0),
+																.out(bullet_y_buffer)
+																);
+		
+	
 	 // For the wall
+	 acceleration_counter a_count(
+		.clk(clk),
+		.resetn(stop),
+		.enable(~busy),
+		.count(26'd850000),
+		.terminal_velocity(26'd1000000),
+		.out(wall_velocity)
+	 );
 	 time_counter wall_counter(
 														 .clk(clk),
 														 .resetn(resetn),
 														 .enable(~busy),
-														 .count(26'd13),
+														 .count(wall_velocity),
 														 .out(wall_delay)
 														 );
 	 wall_control wall_c(
@@ -137,6 +214,7 @@ module processor(
 	 
 	 
 	 assign player_y_in = player_y_buffer[6:0]; 
+	 assign bullet_y_in = bullet_y_buffer[6:0];
 
 	 control player_c(
 										.clk(clk),
@@ -168,6 +246,41 @@ module processor(
 										 .y_out(player_y_out),
 										 .color_out(player_color_out)
 										 );
+		
+	 bullet_control bullet_c(
+										.clk(clk),
+										.resetn(resetn),
+										.player_delay(bullet_delay),
+										.busy(busy),
+										.enable(bullet_enable),
+										.space(space),
+										.isbullet(isbullet),
+										.ld_x(bullet_ld_x),
+										.ld_y(bullet_ld_y),
+										.ld_alu_out(bullet_ld_alu_out),
+										.alu_select(bullet_alu_select),
+										.alu_op(bullet_alu_op),
+										.writeEn(bullet_busy),
+										.is_color(bullet_is_color),
+										.ld_next(bullet_ld_next)
+										);
+	 bullet_datapath bullet_d(
+										 .clk(clk),
+										 .resetn(resetn),
+										 .x_in(bullet_x_in),
+										 .y_in(bullet_y_in),
+										 .ld_x(bullet_ld_x),
+										 .ld_y(bullet_ld_y),
+										 .ld_alu_out(bullet_ld_alu_out),
+										 .alu_select(bullet_alu_select),
+										 .alu_op(bullet_alu_op),
+										 .color_in(3'b001),
+										 .is_color(bullet_is_color),
+										 .x_out(bullet_x_out),
+										 .y_out(bullet_y_out),
+										 .color_out(bullet_color_out),
+										 .bullet_enable(bullet_enable)
+										 );
 	 
 	 
 endmodule // processor
@@ -177,7 +290,7 @@ module control(
 							 input 			clk,
 							 input 			resetn,
 							 input 			player_delay,
-							 input 			busy, 
+							 input 			busy,
 							 output reg ld_x,
 							 output reg ld_y,
 							 output reg ld_alu_out,
@@ -244,7 +357,7 @@ module control(
 			end
 			else if (pcs == S_ERASE) begin 
 				 writeEn = 1'b1;
-				 if (player_eraser != 4'b0000 && player_eraser != 4'd12)begin
+				 if (player_eraser != 4'b0000 && player_eraser < 4'd12)begin
 						// Don't do anything on the first or last step
 						ld_alu_out = 1'b1;
 						// We are always loading a value
@@ -252,7 +365,7 @@ module control(
 							 // Shift right 1 bit every 4 erases
 							 ld_x = 1'b1;
 						end
-						else if (player_eraser[3:2] == 2'b00 || player_eraser[3:2] == 2'b10)begin
+						else if (player_eraser[2] == 1'b0)begin
 							 // Shift down 1 bit every odd right shift
 							 ld_y = 1'b1;
 							 alu_select = 1'b1; 

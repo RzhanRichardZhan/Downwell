@@ -10,6 +10,10 @@ module vga_demux(
 								 input [6:0] 			wall_y_out,
 								 input [2:0] 			wall_color_out,
 								 input 						wall_busy,
+								 input [7:0] 			bullet_x_out,
+								 input [6:0] 			bullet_y_out,
+								 input [2:0] 			bullet_color_out,
+								 input 						bullet_busy,
 								 output reg [7:0] x_out,
 								 output reg [6:0] y_out,
 								 output reg [2:0] color_out
@@ -42,6 +46,11 @@ module vga_demux(
 				 x_out = wall_x_out;
 				 y_out = wall_y_out;
 				 color_out = wall_color_out; 
+			end
+			else if (bullet_busy) begin
+				x_out = bullet_x_out;
+				y_out = bullet_y_out;
+				color_out = bullet_color_out;
 			end
 	 end
 
